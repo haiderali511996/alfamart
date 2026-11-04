@@ -51,23 +51,32 @@ class ExcelExportService {
     final purchases = wb.addSheet('Purchases');
     final handovers = wb.addSheet('Cash to Purchaser');
     final expenses = wb.addSheet('Expenses');
+    final advances = wb.addSheet('Purchaser Advances');
+    final account = wb.addSheet('Purchaser Account');
 
     _purchases(purchases, data);
     _handovers(handovers, data);
     _expenses(expenses, data);
+    _advances(advances, data);
+    _purchaserAccount(account, data, advances, handovers, purchases);
     final cashierRows = <String, List<(String, int, CashierSummary)>>{};
     for (final c in data.byCounter.values) {
       cashierRows[c.counter.id] = _counterSheet(counterSheets[c.counter.id]!, c, data, handovers, expenses);
     }
     _daily(daily, data, counterSheets, purchases, expenses, handovers);
     _summary(summary, data, counterSheets, cashierRows, purchases, expenses, handovers, generatedBy);
+    _summaryPurchaser(summary, data, advances, handovers, purchases);
     return wb;
   }
 
   void _sheetHeader(XlsxSheet s, String title, List<String> headers, List<double> widths) {
     s.text(0, 0, title, style: XStyle.title);
-    s.text(2, 0, 'Add or edit rows below row 4 – all totals and the Summary sheet update automatically.',
-        style: XStyle.note);
+    s.text(
+      2,
+      0,
+      'Add or edit rows below row 4 – all totals and the Summary sheet update automatically.',
+      style: XStyle.note,
+    );
     for (var i = 0; i < headers.length; i++) {
       s.text(3, i, headers[i], style: XStyle.header);
       s.width(i, widths[i]);
@@ -86,8 +95,12 @@ class ExcelExportService {
   // ---------------------------------------------------------------- raw sheets
 
   void _purchases(XlsxSheet s, ReportData d) {
-    _sheetHeader(s, 'Purchases', ['Date', 'Supplier', 'Invoice #', 'Description', 'Payment Method', 'Amount (Rs)'],
-        [12, 24, 14, 34, 18, 16]);
+    _sheetHeader(
+      s,
+      'Purchases',
+      ['Date', 'Supplier', 'Invoice #', 'Description', 'Payment Method', 'Amount (Rs)', 'Purchaser'],
+      [12, 24, 14, 34, 18, 16, 20],
+    );
     var r = _first;
     for (final x in d.purchases) {
       s.text(r, 0, x.date);
@@ -96,15 +109,19 @@ class ExcelExportService {
       s.text(r, 3, x.description);
       s.text(r, 4, x.method.label);
       s.number(r, 5, _rs(x.amount));
+      s.text(r, 6, x.purchaserName.trim().isEmpty ? unnamedPurchaser : x.purchaserName.trim());
       r++;
     }
     _totalRow(s, [5], {5: d.totalPurchases});
   }
 
   void _handovers(XlsxSheet s, ReportData d) {
-    _sheetHeader(s, 'Cash Given to Purchaser (from cashier drawers)',
-        ['Date', 'Time', 'Counter', 'Cashier', 'Purchaser', 'Amount (Rs)', 'Purpose / Details'],
-        [12, 9, 14, 20, 20, 16, 36]);
+    _sheetHeader(
+      s,
+      'Cash Given to Purchaser (from cashier drawers)',
+      ['Date', 'Time', 'Counter', 'Cashier', 'Purchaser', 'Amount (Rs)', 'Purpose / Details'],
+      [12, 9, 14, 20, 20, 16, 36],
+    );
     var r = _first;
     for (final x in d.handovers) {
       s.text(r, 0, x.date);
@@ -120,9 +137,12 @@ class ExcelExportService {
   }
 
   void _expenses(XlsxSheet s, ReportData d) {
-    _sheetHeader(s, 'Expenses',
-        ['Date', 'Counter', 'Cashier', 'Category', 'Payment Method', 'Amount (Rs)', 'Details'],
-        [12, 14, 20, 28, 18, 16, 36]);
+    _sheetHeader(
+      s,
+      'Expenses',
+      ['Date', 'Counter', 'Cashier', 'Category', 'Payment Method', 'Amount (Rs)', 'Details'],
+      [12, 14, 20, 28, 18, 16, 36],
+    );
     var r = _first;
     for (final x in d.expenses) {
       s.text(r, 0, x.date);
@@ -137,18 +157,141 @@ class ExcelExportService {
     _totalRow(s, [5], {5: d.totalExpenses});
   }
 
+  void _advances(XlsxSheet s, ReportData d) {
+    _sheetHeader(s, 'Advances Given to Purchasers', ['Date', 'Purchaser', 'Amount (Rs)', 'Notes'], [12, 22, 16, 36]);
+    var r = _first;
+    for (final x in d.advances) {
+      s.text(r, 0, x.date);
+      s.text(r, 1, x.purchaserName);
+      s.number(r, 2, _rs(x.amount));
+      s.text(r, 3, x.notes);
+      r++;
+    }
+    _totalRow(s, [2], {2: d.totalAdvances});
+  }
+
+  /// Per purchaser per day: advance + taken from counters − cash purchases.
+  /// Positive balance (green) = to return; negative (red) = not covered.
+  void _purchaserAccount(XlsxSheet s, ReportData d, XlsxSheet adv, XlsxSheet han, XlsxSheet pur) {
+    _sheetHeader(
+      s,
+      'Purchaser Account',
+      ['Date', 'Purchaser', 'Advance', 'Taken from Counters', 'Cash Purchases', 'Balance', 'Status'],
+      [12, 22, 15, 18, 16, 16, 20],
+    );
+    s.text(
+      2,
+      0,
+      'Balance = Advance + Taken from counters − Cash purchases. Green = purchaser returns it, '
+      'red = spent more than given (take it from a counter).',
+      style: XStyle.note,
+    );
+    final a = adv.quoted, h = han.quoted, p = pur.quoted;
+    final days = [...d.purchaserDays]
+      ..sort((x, y) {
+        final c = x.date.compareTo(y.date);
+        return c != 0 ? c : x.name.compareTo(y.name);
+      });
+    final totals = <int, int>{};
+    var r = _first;
+    for (final day in days) {
+      final row = r + 1;
+      s.text(r, 0, day.date);
+      s.text(r, 1, day.name);
+      s.formula(
+        r,
+        2,
+        'SUMIFS($a!${_rng('C')},$a!${_rng('A')},\$A$row,$a!${_rng('B')},\$B$row)',
+        cached: _rs(day.advance),
+      );
+      s.formula(
+        r,
+        3,
+        'SUMIFS($h!${_rng('F')},$h!${_rng('A')},\$A$row,$h!${_rng('E')},\$B$row)',
+        cached: _rs(day.fromCounters),
+      );
+      s.formula(
+        r,
+        4,
+        'SUMIFS($p!${_rng('F')},$p!${_rng('A')},\$A$row,$p!${_rng('G')},\$B$row,'
+        '$p!${_rng('E')},${_str(PaymentMethod.cash.label)})',
+        cached: _rs(day.cashPurchases),
+      );
+      s.formula(r, 5, 'C$row+D$row-E$row', cached: _rs(day.balance), style: XStyle.moneyBold);
+      final status = day.balance > 0 ? 'To return' : (day.balance < 0 ? 'Not covered' : 'Settled');
+      s.formula(r, 6, 'IF(F$row>0,"To return",IF(F$row<0,"Not covered","Settled"))', cachedText: status);
+      for (final (c, v) in [(2, day.advance), (3, day.fromCounters), (4, day.cashPurchases), (5, day.balance)]) {
+        totals[c] = (totals[c] ?? 0) + v;
+      }
+      r++;
+    }
+    _totalRow(s, [2, 3, 4, 5], totals);
+    s.greenWhenPositive('F2:F$_lastExcelRow');
+  }
+
+  void _summaryPurchaser(XlsxSheet s, ReportData d, XlsxSheet adv, XlsxSheet han, XlsxSheet pur) {
+    // Placed to the right of the overview so the existing layout is unchanged.
+    const c = 3; // column D
+    var r = 4;
+    s.text(r++, c, 'Purchaser Account', style: XStyle.subtitle);
+    s.text(r, c, 'Item', style: XStyle.header);
+    s.text(r++, c + 1, 'Amount (Rs)', style: XStyle.header);
+    final first = r + 1;
+    s.text(r, c, 'Advance given');
+    s.formula(r++, c + 1, '${adv.quoted}!\$C\$2', cached: _rs(d.totalAdvances));
+    s.text(r, c, '+ Taken from counters');
+    s.formula(r++, c + 1, '${han.quoted}!\$F\$2', cached: _rs(d.totalHandovers));
+    s.text(r, c, '− Cash purchases');
+    s.formula(
+      r++,
+      c + 1,
+      'SUMIF(${pur.quoted}!${_rng('E')},${_str(PaymentMethod.cash.label)},${pur.quoted}!${_rng('F')})',
+      cached: _rs(d.totalCashPurchases),
+    );
+    s.text(r, c, 'Balance (+ to return / − not covered)', style: XStyle.totalLabel);
+    final col = XlsxSheet.colName(c + 1);
+    s.formula(
+      r,
+      c + 1,
+      '$col$first+$col${first + 1}-$col${first + 2}',
+      cached: _rs(d.purchaserBalance),
+      style: XStyle.totalMoney,
+    );
+    s.greenWhenPositive('$col${r + 1}');
+    s.width(c, 34);
+    s.width(c + 1, 18);
+  }
+
   // -------------------------------------------------------------- counter sheet
 
   /// Returns where each cashier's summary row is, for the Summary sheet.
   List<(String, int, CashierSummary)> _counterSheet(
-      XlsxSheet s, CounterSummary c, ReportData d, XlsxSheet handoverSheet, XlsxSheet expenseSheet) {
+    XlsxSheet s,
+    CounterSummary c,
+    ReportData d,
+    XlsxSheet handoverSheet,
+    XlsxSheet expenseSheet,
+  ) {
     final name = c.counter.name;
     _sheetHeader(
       s,
       '$name – Shift Sales & Cash Reconciliation',
       [
-        'Date', 'Cashier', 'Start', 'End', 'Opening Cash', 'Cash', 'POS Machine', 'Online Banking', 'JazzCash',
-        'Total Sale', 'Cash to Purchaser', 'Cash Expenses', 'Expected Cash', 'Counted Cash', 'Short(-)/Excess(+)',
+        'Date',
+        'Cashier',
+        'Start',
+        'End',
+        'Opening Cash',
+        'Cash',
+        'POS Machine',
+        'Online Banking',
+        'JazzCash',
+        'Total Sale',
+        'Cash to Purchaser',
+        'Cash Expenses',
+        'Expected Cash',
+        'Counted Cash',
+        'Short(-)/Excess(+)',
         'Notes',
       ],
       [12, 20, 8, 8, 14, 14, 14, 15, 13, 15, 15, 14, 15, 14, 16, 28],
@@ -185,17 +328,19 @@ class ExcelExportService {
       s.number(r, 8, _rs(x.jazzcash));
       s.formula(r, 9, 'SUM(F$row:I$row)', cached: _rs(x.totalSale), style: XStyle.moneyBold);
       s.formula(
-          r,
-          10,
-          'SUMIFS($h!${_rng('F')},$h!${_rng('A')},\$A$row,$h!${_rng('C')},${_str(name)},'
-          '$h!${_rng('D')},\$B$row)',
-          cached: _rs(handed));
+        r,
+        10,
+        'SUMIFS($h!${_rng('F')},$h!${_rng('A')},\$A$row,$h!${_rng('C')},${_str(name)},'
+        '$h!${_rng('D')},\$B$row)',
+        cached: _rs(handed),
+      );
       s.formula(
-          r,
-          11,
-          'SUMIFS($e!${_rng('F')},$e!${_rng('A')},\$A$row,$e!${_rng('B')},${_str(name)},'
-          '$e!${_rng('C')},\$B$row,$e!${_rng('E')},${_str(PaymentMethod.cash.label)})',
-          cached: _rs(cashExp));
+        r,
+        11,
+        'SUMIFS($e!${_rng('F')},$e!${_rng('A')},\$A$row,$e!${_rng('B')},${_str(name)},'
+        '$e!${_rng('C')},\$B$row,$e!${_rng('E')},${_str(PaymentMethod.cash.label)})',
+        cached: _rs(cashExp),
+      );
       s.formula(r, 12, 'E$row+F$row-K$row-L$row', cached: _rs(expected), style: XStyle.moneyBold);
       if (x.closingCash != null) s.number(r, 13, _rs(x.closingCash!));
       if (diff == null) {
@@ -206,8 +351,17 @@ class ExcelExportService {
       s.text(r, 15, x.notes);
 
       final values = {
-        4: x.openingCash, 5: x.cash, 6: x.pos, 7: x.online, 8: x.jazzcash, 9: x.totalSale, 10: handed,
-        11: cashExp, 12: expected, 13: x.closingCash ?? 0, 14: diff ?? 0,
+        4: x.openingCash,
+        5: x.cash,
+        6: x.pos,
+        7: x.online,
+        8: x.jazzcash,
+        9: x.totalSale,
+        10: handed,
+        11: cashExp,
+        12: expected,
+        13: x.closingCash ?? 0,
+        14: diff ?? 0,
       };
       final pc = perCashier.putIfAbsent(x.cashierId, () => {});
       values.forEach((k, v) {
@@ -223,8 +377,16 @@ class ExcelExportService {
     const base = 17; // column R
     s.text(2, base, 'Cashier-wise Summary – $name', style: XStyle.subtitle);
     final headers = [
-      'Cashier', 'Shifts', 'Cash', 'POS Machine', 'Online Banking', 'JazzCash', 'Total Sale', 'Cash to Purchaser',
-      'Cash Expenses', 'Short(-)/Excess(+)',
+      'Cashier',
+      'Shifts',
+      'Cash',
+      'POS Machine',
+      'Online Banking',
+      'JazzCash',
+      'Total Sale',
+      'Cash to Purchaser',
+      'Cash Expenses',
+      'Short(-)/Excess(+)',
     ];
     final sourceCols = ['', '', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'O'];
     final sourceIdx = [0, -1, 5, 6, 7, 8, 9, 10, 11, 14];
@@ -239,8 +401,7 @@ class ExcelExportService {
       ...d.cashierById.values
           .where((x) => x.counterId == c.counter.id && x.isActive && x.meta != null)
           .map((x) => x.id),
-    }.toList()
-      ..sort((a, b) => d.cashierName(a).compareTo(d.cashierName(b)));
+    }.toList()..sort((a, b) => d.cashierName(a).compareTo(d.cashierName(b)));
 
     final result = <(String, int, CashierSummary)>[];
     var cr = _first;
@@ -256,8 +417,13 @@ class ExcelExportService {
         final src = sourceCols[i];
         final v = pc[sourceIdx[i]] ?? 0;
         tableTotals[i] = (tableTotals[i] ?? 0) + v;
-        s.formula(cr, base + i, 'SUMIF(${_rng('B')},$nameCell,${_rng(src)})',
-            cached: _rs(v), style: i == 6 ? XStyle.moneyBold : XStyle.money);
+        s.formula(
+          cr,
+          base + i,
+          'SUMIF(${_rng('B')},$nameCell,${_rng(src)})',
+          cached: _rs(v),
+          style: i == 6 ? XStyle.moneyBold : XStyle.money,
+        );
       }
       result.add((s.name, cr, c.cashiers[id] ?? CashierSummary(id, d.cashierName(id))));
       cr++;
@@ -267,22 +433,36 @@ class ExcelExportService {
     for (var i = 1; i < headers.length; i++) {
       final col = XlsxSheet.colName(base + i);
       final f = cashierIds.isEmpty ? '0' : 'SUM($col${_first + 1}:$col$totalRow)';
-      s.formula(totalRow, base + i, f,
-          cached: i == 1 ? (tableTotals[1] ?? 0) : _rs(tableTotals[i] ?? 0),
-          style: i == 1 ? XStyle.integer : XStyle.totalMoney);
+      s.formula(
+        totalRow,
+        base + i,
+        f,
+        cached: i == 1 ? (tableTotals[1] ?? 0) : _rs(tableTotals[i] ?? 0),
+        style: i == 1 ? XStyle.integer : XStyle.totalMoney,
+      );
     }
     return result;
   }
 
   // ---------------------------------------------------------------- daily sheet
 
-  void _daily(XlsxSheet s, ReportData d, Map<String, XlsxSheet> counters, XlsxSheet purchases, XlsxSheet expenses,
-      XlsxSheet handovers) {
+  void _daily(
+    XlsxSheet s,
+    ReportData d,
+    Map<String, XlsxSheet> counters,
+    XlsxSheet purchases,
+    XlsxSheet expenses,
+    XlsxSheet handovers,
+  ) {
     final counterList = d.byCounter.values.toList();
     final headers = [
       'Date',
       for (final c in counterList) '${c.counter.name} Sales',
-      'Total Sales', 'Purchases', 'Expenses', 'Cash to Purchaser', 'Net Cash Flow',
+      'Total Sales',
+      'Purchases',
+      'Expenses',
+      'Cash to Purchaser',
+      'Net Cash Flow',
     ];
     _sheetHeader(s, 'Day-wise Summary', headers, [12, for (final _ in headers.skip(1)) 16]);
     s.text(2, 0, 'Every value here is a formula that reads the other sheets.', style: XStyle.note);
@@ -316,14 +496,31 @@ class ExcelExportService {
       add(hanCol, han);
       add(netCol, dayTotal - pur - exp);
       final first = XlsxSheet.colName(1), last = XlsxSheet.colName(nC);
-      s.formula(r, totalCol, nC == 0 ? '0' : 'SUM($first$row:$last$row)', cached: _rs(dayTotal),
-          style: XStyle.moneyBold);
-      s.formula(r, purCol, 'SUMIF(${purchases.quoted}!${_rng('A')},\$A$row,${purchases.quoted}!${_rng('F')})',
-          cached: _rs(pur));
-      s.formula(r, expCol, 'SUMIF(${expenses.quoted}!${_rng('A')},\$A$row,${expenses.quoted}!${_rng('F')})',
-          cached: _rs(exp));
-      s.formula(r, hanCol, 'SUMIF(${handovers.quoted}!${_rng('A')},\$A$row,${handovers.quoted}!${_rng('F')})',
-          cached: _rs(han));
+      s.formula(
+        r,
+        totalCol,
+        nC == 0 ? '0' : 'SUM($first$row:$last$row)',
+        cached: _rs(dayTotal),
+        style: XStyle.moneyBold,
+      );
+      s.formula(
+        r,
+        purCol,
+        'SUMIF(${purchases.quoted}!${_rng('A')},\$A$row,${purchases.quoted}!${_rng('F')})',
+        cached: _rs(pur),
+      );
+      s.formula(
+        r,
+        expCol,
+        'SUMIF(${expenses.quoted}!${_rng('A')},\$A$row,${expenses.quoted}!${_rng('F')})',
+        cached: _rs(exp),
+      );
+      s.formula(
+        r,
+        hanCol,
+        'SUMIF(${handovers.quoted}!${_rng('A')},\$A$row,${handovers.quoted}!${_rng('F')})',
+        cached: _rs(han),
+      );
       final t = XlsxSheet.colName(totalCol), pc = XlsxSheet.colName(purCol), ec = XlsxSheet.colName(expCol);
       s.formula(r, netCol, '$t$row-$pc$row-$ec$row', cached: _rs(dayTotal - pur - exp), style: XStyle.moneyBold);
       r++;
@@ -348,15 +545,17 @@ class ExcelExportService {
     }
     s.text(0, 0, 'ALFA MART – Cash Flow Report', style: XStyle.title);
     s.text(1, 0, 'Period: ${d.range.label}', style: XStyle.subtitle);
-    s.text(2, 0,
-        'Generated ${DateFormat('dd MMM yyyy, hh:mm a').format(DateTime.now())} by $generatedBy. '
-        'All figures are live formulas – edit any sheet and this page updates.',
-        style: XStyle.note);
+    s.text(
+      2,
+      0,
+      'Generated ${DateFormat('dd MMM yyyy, hh:mm a').format(DateTime.now())} by $generatedBy. '
+      'All figures are live formulas – edit any sheet and this page updates.',
+      style: XStyle.note,
+    );
 
     final counterList = d.byCounter.values.toList();
     String cRef(CounterSummary c, String cell) => '${counters[c.counter.id]!.quoted}!\$$cell\$2';
-    String sumCounters(String col) =>
-        counterList.isEmpty ? '0' : counterList.map((c) => cRef(c, col)).join('+');
+    String sumCounters(String col) => counterList.isEmpty ? '0' : counterList.map((c) => cRef(c, col)).join('+');
 
     var r = 4;
     // Overview
@@ -371,8 +570,13 @@ class ExcelExportService {
     s.text(r, 0, 'Total Expenses');
     s.formula(r++, 1, '${expenses.quoted}!\$F\$2', cached: _rs(d.totalExpenses));
     s.text(r, 0, 'Net Cash Flow (Sales − Purchases − Expenses)', style: XStyle.totalLabel);
-    s.formula(r++, 1, 'B$salesRow-B${salesRow + 1}-B${salesRow + 2}',
-        cached: _rs(d.netCashFlow), style: XStyle.totalMoney);
+    s.formula(
+      r++,
+      1,
+      'B$salesRow-B${salesRow + 1}-B${salesRow + 2}',
+      cached: _rs(d.netCashFlow),
+      style: XStyle.totalMoney,
+    );
     s.text(r, 0, 'Cash Given to Purchasers');
     s.formula(r++, 1, '${handovers.quoted}!\$F\$2', cached: _rs(d.totalHandovers));
     s.text(r, 0, 'Cash Short (−) / Excess (+)');
@@ -405,26 +609,45 @@ class ExcelExportService {
       for (var i = 0; i < counterList.length; i++) {
         s.formula(r, 1 + i, cRef(counterList[i], methodCols[m]!), cached: _rs(counterList[i].byMethod[m]!));
       }
-      s.formula(r, totCol,
-          counterList.isEmpty ? '0' : 'SUM(B$row:${XlsxSheet.colName(counterList.length)}$row)',
-          cached: _rs(d.salesByMethod[m]!), style: XStyle.moneyBold);
-      s.formula(r, totCol + 1, 'IF(\$$tc\$$grandRow=0,0,$tc$row/\$$tc\$$grandRow)',
-          cached: d.totalSales == 0 ? 0 : d.salesByMethod[m]! / d.totalSales, style: XStyle.percent);
+      s.formula(
+        r,
+        totCol,
+        counterList.isEmpty ? '0' : 'SUM(B$row:${XlsxSheet.colName(counterList.length)}$row)',
+        cached: _rs(d.salesByMethod[m]!),
+        style: XStyle.moneyBold,
+      );
+      s.formula(
+        r,
+        totCol + 1,
+        'IF(\$$tc\$$grandRow=0,0,$tc$row/\$$tc\$$grandRow)',
+        cached: d.totalSales == 0 ? 0 : d.salesByMethod[m]! / d.totalSales,
+        style: XStyle.percent,
+      );
       r++;
     }
     s.text(r, 0, 'TOTAL', style: XStyle.totalLabel);
     for (var i = 0; i <= counterList.length; i++) {
       final col = XlsxSheet.colName(1 + i);
       final cached = i < counterList.length ? counterList[i].sales : d.totalSales;
-      s.formula(r, 1 + i, 'SUM($col$firstMethodRow:$col${grandRow - 1})', cached: _rs(cached),
-          style: XStyle.totalMoney);
+      s.formula(
+        r,
+        1 + i,
+        'SUM($col$firstMethodRow:$col${grandRow - 1})',
+        cached: _rs(cached),
+        style: XStyle.totalMoney,
+      );
     }
     r += 2;
 
     // Counter summary
     s.text(r++, 0, 'Counter Summary', style: XStyle.subtitle);
     for (final (i, hText) in [
-      'Counter', 'Shifts', 'Total Sale', 'Cash to Purchaser', 'Counter Expenses', 'Short(-)/Excess(+)'
+      'Counter',
+      'Shifts',
+      'Total Sale',
+      'Cash to Purchaser',
+      'Counter Expenses',
+      'Short(-)/Excess(+)',
     ].indexed) {
       s.text(r, i, hText, style: XStyle.header);
     }
@@ -435,10 +658,8 @@ class ExcelExportService {
       s.text(r, 0, c.counter.name);
       s.formula(r, 1, 'COUNTA($cs!${_rng('A')})', cached: c.shifts, style: XStyle.integer);
       s.formula(r, 2, cRef(c, 'J'), cached: _rs(c.sales), style: XStyle.moneyBold);
-      s.formula(r, 3, 'SUMIF($h!${_rng('C')},${_str(c.counter.name)},$h!${_rng('F')})',
-          cached: _rs(c.handovers));
-      s.formula(r, 4, 'SUMIF($e!${_rng('B')},${_str(c.counter.name)},$e!${_rng('F')})',
-          cached: _rs(c.expenses));
+      s.formula(r, 3, 'SUMIF($h!${_rng('C')},${_str(c.counter.name)},$h!${_rng('F')})', cached: _rs(c.handovers));
+      s.formula(r, 4, 'SUMIF($e!${_rng('B')},${_str(c.counter.name)},$e!${_rng('F')})', cached: _rs(c.expenses));
       s.formula(r, 5, cRef(c, 'O'), cached: _rs(c.shortExcess), style: XStyle.moneyBold);
       r++;
     }
@@ -449,7 +670,13 @@ class ExcelExportService {
     // Cashier summary, read from each counter sheet's cashier table.
     s.text(r++, 0, 'Cashier Summary', style: XStyle.subtitle);
     for (final (i, hText) in [
-      'Cashier', 'Counter', 'Shifts', 'Total Sale', 'Cash to Purchaser', 'Cash Expenses', 'Short(-)/Excess(+)'
+      'Cashier',
+      'Counter',
+      'Shifts',
+      'Total Sale',
+      'Cash to Purchaser',
+      'Cash Expenses',
+      'Short(-)/Excess(+)',
     ].indexed) {
       s.text(r, i, hText, style: XStyle.header);
     }
@@ -462,12 +689,16 @@ class ExcelExportService {
         s.formula(r, 0, at(0), cachedText: cs.name, style: XStyle.text);
         s.text(r, 1, c.counter.name);
         s.formula(r, 2, at(1), cached: cs.shifts, style: XStyle.integer);
-        s.formula(r, 3, at(6), cached: _rs(_sumRow(d, c, cs.cashierId, (x) => x.totalSale)),
-            style: XStyle.moneyBold);
+        s.formula(r, 3, at(6), cached: _rs(_sumRow(d, c, cs.cashierId, (x) => x.totalSale)), style: XStyle.moneyBold);
         s.formula(r, 4, at(7), cached: _rs(_sumRow(d, c, cs.cashierId, d.handoversFor)));
         s.formula(r, 5, at(8), cached: _rs(_sumRow(d, c, cs.cashierId, d.cashExpensesFor)));
-        s.formula(r, 6, at(9), cached: _rs(_sumRow(d, c, cs.cashierId, (x) => d.difference(x) ?? 0)),
-            style: XStyle.moneyBold);
+        s.formula(
+          r,
+          6,
+          at(9),
+          cached: _rs(_sumRow(d, c, cs.cashierId, (x) => d.difference(x) ?? 0)),
+          style: XStyle.moneyBold,
+        );
         r++;
       }
     }
@@ -480,8 +711,12 @@ class ExcelExportService {
     final pq = purchases.quoted;
     for (final m in PaymentMethod.values) {
       s.text(r, 0, m.label);
-      s.formula(r++, 1, 'SUMIF($pq!${_rng('E')},${_str(m.label)},$pq!${_rng('F')})',
-          cached: _rs(d.purchasesByMethod[m] ?? 0));
+      s.formula(
+        r++,
+        1,
+        'SUMIF($pq!${_rng('E')},${_str(m.label)},$pq!${_rng('F')})',
+        cached: _rs(d.purchasesByMethod[m] ?? 0),
+      );
     }
     r++;
 
@@ -492,12 +727,15 @@ class ExcelExportService {
     final cats = {...expenseCategories, ...d.expensesByCategory.keys};
     for (final cat in cats) {
       s.text(r, 0, cat);
-      s.formula(r++, 1, 'SUMIF($e!${_rng('D')},${_str(cat)},$e!${_rng('F')})',
-          cached: _rs(d.expensesByCategory[cat] ?? 0));
+      s.formula(
+        r++,
+        1,
+        'SUMIF($e!${_rng('D')},${_str(cat)},$e!${_rng('F')})',
+        cached: _rs(d.expensesByCategory[cat] ?? 0),
+      );
     }
   }
 
-  int _sumRow(ReportData d, CounterSummary c, String cashierId, int Function(ShiftSale) f) => d.shifts
-      .where((x) => x.counterId == c.counter.id && x.cashierId == cashierId)
-      .fold<int>(0, (a, b) => a + f(b));
+  int _sumRow(ReportData d, CounterSummary c, String cashierId, int Function(ShiftSale) f) =>
+      d.shifts.where((x) => x.counterId == c.counter.id && x.cashierId == cashierId).fold<int>(0, (a, b) => a + f(b));
 }

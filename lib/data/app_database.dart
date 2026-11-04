@@ -11,7 +11,7 @@ class AppDatabase {
   AppDatabase._(this._db, this.path);
 
   static const fileName = 'alfamart_cashflow.db';
-  static const schemaVersion = 1;
+  static const schemaVersion = 2;
 
   /// Tables that are mirrored to the server once sync is enabled.
   static const syncTables = [
@@ -22,6 +22,7 @@ class AppDatabase {
     'purchases',
     'cash_handovers',
     'expenses',
+    'purchaser_advances',
   ];
 
   Database _db;
@@ -31,18 +32,18 @@ class AppDatabase {
 
   static Future<String> defaultPath() async => p.join(await getDatabasesPath(), fileName);
 
-  static Future<AppDatabase> open() async {
-    final path = await defaultPath();
-    return AppDatabase._(await _openAt(path), path);
+  static Future<AppDatabase> open({String? path}) async {
+    final at = path ?? await defaultPath();
+    return AppDatabase._(await _openAt(at), at);
   }
 
   static Future<Database> _openAt(String path) => openDatabase(
-        path,
-        version: schemaVersion,
-        onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
-        onCreate: _create,
-        onUpgrade: _upgrade,
-      );
+    path,
+    version: schemaVersion,
+    onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
+    onCreate: _create,
+    onUpgrade: _upgrade,
+  );
 
   Future<void> reopen() async {
     if (_db.isOpen) await _db.close();
@@ -127,6 +128,7 @@ class AppDatabase {
         invoice_no TEXT,
         payment_method TEXT NOT NULL,
         description TEXT,
+        purchaser_name TEXT,
         $_meta
       )''');
     batch.execute('''
@@ -167,6 +169,7 @@ class AppDatabase {
         after_json TEXT
       )''');
     batch.execute('CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)');
+    _createAdvances(batch);
     for (final t in ['shift_sales', 'purchases', 'cash_handovers', 'expenses']) {
       batch.execute('CREATE INDEX idx_${t}_date ON $t(date)');
     }
@@ -190,7 +193,27 @@ class AppDatabase {
   }
 
   static Future<void> _upgrade(Database db, int from, int to) async {
-    // Future schema migrations go here, e.g. `if (from < 2) { ... }`.
+    if (from < 2) {
+      // v2: who made each purchase, and cash advanced to purchasers.
+      final batch = db.batch();
+      batch.execute('ALTER TABLE purchases ADD COLUMN purchaser_name TEXT');
+      _createAdvances(batch);
+      await batch.commit(noResult: true);
+    }
+  }
+
+  /// Cash given to a purchaser up front (e.g. before the day starts).
+  static void _createAdvances(Batch batch) {
+    batch.execute('''
+      CREATE TABLE purchaser_advances (
+        id TEXT PRIMARY KEY,
+        date TEXT NOT NULL,
+        purchaser_name TEXT NOT NULL,
+        amount INTEGER NOT NULL,
+        notes TEXT,
+        $_meta
+      )''');
+    batch.execute('CREATE INDEX idx_purchaser_advances_date ON purchaser_advances(date)');
   }
 
   /// Checks that a file looks like a backup made by this app.
@@ -199,7 +222,8 @@ class AppDatabase {
     try {
       probe = await openReadOnlyDatabase(filePath);
       final rows = await probe.rawQuery(
-          "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('users','shift_sales','counters')");
+        "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('users','shift_sales','counters')",
+      );
       return rows.length == 3;
     } catch (_) {
       return false;

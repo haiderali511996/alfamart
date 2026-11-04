@@ -39,6 +39,7 @@ class XlsxSheet {
   int? freezeRows;
   int? freezeCols;
   final List<String> _merges = [];
+  final List<String> _greenRed = [];
 
   /// Excel reference such as `A1` for zero-based [row] / [col].
   static String ref(int row, int col, {bool absRow = false, bool absCol = false}) =>
@@ -73,17 +74,25 @@ class XlsxSheet {
 
   void merge(int r1, int c1, int r2, int c2) => _merges.add('${ref(r1, c1)}:${ref(r2, c2)}');
 
+  /// Shows values above zero in green and below zero in red (live, so it
+  /// follows edits).
+  void greenWhenPositive(String range) => _greenRed.add(range);
+
   String _xml() {
     final b = StringBuffer()
       ..write('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>')
-      ..write('<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
-          'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">');
+      ..write(
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">',
+      );
     b.write('<sheetViews><sheetView workbookViewId="0">');
     if ((freezeRows ?? 0) > 0 || (freezeCols ?? 0) > 0) {
       final fr = freezeRows ?? 0, fc = freezeCols ?? 0;
       final pane = fr > 0 && fc > 0 ? 'bottomRight' : (fr > 0 ? 'bottomLeft' : 'topRight');
-      b.write('<pane ${fc > 0 ? 'xSplit="$fc" ' : ''}${fr > 0 ? 'ySplit="$fr" ' : ''}'
-          'topLeftCell="${ref(fr, fc)}" activePane="$pane" state="frozen"/>');
+      b.write(
+        '<pane ${fc > 0 ? 'xSplit="$fc" ' : ''}${fr > 0 ? 'ySplit="$fr" ' : ''}'
+        'topLeftCell="${ref(fr, fc)}" activePane="$pane" state="frozen"/>',
+      );
     }
     b.write('</sheetView></sheetViews>');
     b.write('<sheetFormatPr defaultRowHeight="15"/>');
@@ -128,6 +137,15 @@ class XlsxSheet {
         b.write('<mergeCell ref="$m"/>');
       }
       b.write('</mergeCells>');
+    }
+    var priority = 1;
+    for (final range in _greenRed) {
+      b.write(
+        '<conditionalFormatting sqref="$range">'
+        '<cfRule type="cellIs" dxfId="0" priority="${priority++}" operator="greaterThan"><formula>0</formula></cfRule>'
+        '<cfRule type="cellIs" dxfId="1" priority="${priority++}" operator="lessThan"><formula>0</formula></cfRule>'
+        '</conditionalFormatting>',
+      );
     }
     b.write('<pageMargins left="0.5" right="0.5" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>');
     b.write('<pageSetup orientation="landscape" fitToWidth="1" fitToHeight="0"/>');
@@ -182,44 +200,56 @@ class XlsxWorkbook {
     }
 
     add('[Content_Types].xml', _contentTypes());
-    add('_rels/.rels',
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
-        '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>'
-        '<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>'
-        '</Relationships>');
+    add(
+      '_rels/.rels',
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+          '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+          '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+          '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>'
+          '<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>'
+          '</Relationships>',
+    );
     final now = DateTime.now().toUtc().toIso8601String().split('.').first;
-    add('docProps/core.xml',
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-        '<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" '
-        'xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" '
-        'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">'
-        '<dc:creator>${_esc(creator)}</dc:creator>'
-        '<dcterms:created xsi:type="dcterms:W3CDTF">${now}Z</dcterms:created>'
-        '</cp:coreProperties>');
-    add('docProps/app.xml',
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-        '<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties">'
-        '<Application>Alfa Mart Cash Flow</Application></Properties>');
+    add(
+      'docProps/core.xml',
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+          '<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" '
+          'xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" '
+          'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">'
+          '<dc:creator>${_esc(creator)}</dc:creator>'
+          '<dcterms:created xsi:type="dcterms:W3CDTF">${now}Z</dcterms:created>'
+          '</cp:coreProperties>',
+    );
+    add(
+      'docProps/app.xml',
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+          '<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties">'
+          '<Application>Alfa Mart Cash Flow</Application></Properties>',
+    );
     final wb = StringBuffer()
       ..write('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>')
-      ..write('<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
-          'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">')
+      ..write(
+        '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">',
+      )
       ..write('<bookViews><workbookView activeTab="0"/></bookViews><sheets>');
     final rels = StringBuffer()
       ..write('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>')
       ..write('<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">');
     for (var i = 0; i < sheets.length; i++) {
       wb.write('<sheet name="${_esc(sheets[i].name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>');
-      rels.write('<Relationship Id="rId${i + 1}" '
-          'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" '
-          'Target="worksheets/sheet${i + 1}.xml"/>');
+      rels.write(
+        '<Relationship Id="rId${i + 1}" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" '
+        'Target="worksheets/sheet${i + 1}.xml"/>',
+      );
       add('xl/worksheets/sheet${i + 1}.xml', sheets[i]._xml());
     }
     wb.write('</sheets><calcPr calcId="191029" fullCalcOnLoad="1"/></workbook>');
-    rels.write('<Relationship Id="rId${sheets.length + 1}" '
-        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>');
+    rels.write(
+      '<Relationship Id="rId${sheets.length + 1}" '
+      'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>',
+    );
     rels.write('</Relationships>');
     add('xl/workbook.xml', wb.toString());
     add('xl/_rels/workbook.xml.rels', rels.toString());
@@ -233,24 +263,35 @@ class XlsxWorkbook {
       ..write('<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">')
       ..write('<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>')
       ..write('<Default Extension="xml" ContentType="application/xml"/>')
-      ..write('<Override PartName="/xl/workbook.xml" '
-          'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>')
-      ..write('<Override PartName="/xl/styles.xml" '
-          'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>')
-      ..write('<Override PartName="/docProps/core.xml" '
-          'ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>')
-      ..write('<Override PartName="/docProps/app.xml" '
-          'ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>');
+      ..write(
+        '<Override PartName="/xl/workbook.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>',
+      )
+      ..write(
+        '<Override PartName="/xl/styles.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>',
+      )
+      ..write(
+        '<Override PartName="/docProps/core.xml" '
+        'ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>',
+      )
+      ..write(
+        '<Override PartName="/docProps/app.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>',
+      );
     for (var i = 0; i < sheets.length; i++) {
-      b.write('<Override PartName="/xl/worksheets/sheet${i + 1}.xml" '
-          'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>');
+      b.write(
+        '<Override PartName="/xl/worksheets/sheet${i + 1}.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>',
+      );
     }
     b.write('</Types>');
     return b.toString();
   }
 
   // Brand colours: navy 011E65, orange FD6900.
-  static const _stylesXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+  static const _stylesXml =
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
       '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
       '<numFmts count="1"><numFmt numFmtId="164" formatCode="#,##0.00;[Red]-#,##0.00"/></numFmts>'
       '<fonts count="6">'
@@ -288,5 +329,9 @@ class XlsxWorkbook {
       '<xf numFmtId="10" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1"/>'
       '</cellXfs>'
       '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
+      '<dxfs count="2">'
+      '<dxf><font><b/><color rgb="FF1B8A4B"/></font><fill><patternFill><bgColor rgb="FFE6F4EA"/></patternFill></fill></dxf>'
+      '<dxf><font><b/><color rgb="FFC62828"/></font><fill><patternFill><bgColor rgb="FFFDECEA"/></patternFill></fill></dxf>'
+      '</dxfs>'
       '</styleSheet>';
 }

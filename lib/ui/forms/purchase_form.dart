@@ -26,6 +26,8 @@ class _PurchaseFormState extends State<PurchaseForm> {
   final _supplier = TextEditingController();
   final _invoice = TextEditingController();
   final _desc = TextEditingController();
+  final _purchaser = TextEditingController();
+  List<String> _names = [];
   bool _saving = false;
 
   @override
@@ -39,7 +41,15 @@ class _PurchaseFormState extends State<PurchaseForm> {
       _supplier.text = e.supplier;
       _invoice.text = e.invoiceNo;
       _desc.text = e.description;
+      _purchaser.text = e.purchaserName;
     }
+    context.read<AppServices>().purchaserNames().then((n) {
+      if (!mounted) return;
+      setState(() {
+        _names = n;
+        if (widget.existing == null && n.length == 1) _purchaser.text = n.first;
+      });
+    });
   }
 
   Future<void> _save() async {
@@ -56,6 +66,7 @@ class _PurchaseFormState extends State<PurchaseForm> {
         invoiceNo: _invoice.text.trim(),
         method: _method,
         description: _desc.text.trim(),
+        purchaserName: _purchaser.text.trim(),
       ),
       (v) {
         if (mounted) setState(() => _saving = v);
@@ -84,14 +95,24 @@ class _PurchaseFormState extends State<PurchaseForm> {
           controller: _invoice,
           decoration: const InputDecoration(labelText: 'Invoice / Bill # (optional)', prefixIcon: Icon(Icons.tag)),
         ),
-        AmountField(controller: _amount, label: 'Purchase amount', icon: Icons.payments, required: true, allowZero: false),
+        PurchaserNameField(controller: _purchaser, names: _names, required: false),
+        if (_method == PaymentMethod.cash)
+          Text(
+            'Cash purchases are paid from this purchaser\'s advance and the cash taken from counters.',
+            style: TextStyle(color: Colors.grey.shade700, fontSize: 12),
+          ),
+        AmountField(
+          controller: _amount,
+          label: 'Purchase amount',
+          icon: Icons.payments,
+          required: true,
+          allowZero: false,
+        ),
         DropdownButtonFormField<PaymentMethod>(
           isExpanded: true,
           initialValue: _method,
           decoration: const InputDecoration(labelText: 'Paid by', prefixIcon: Icon(Icons.account_balance_wallet)),
-          items: [
-            for (final m in PaymentMethod.values) DropdownMenuItem(value: m, child: Text(m.label)),
-          ],
+          items: [for (final m in PaymentMethod.values) DropdownMenuItem(value: m, child: Text(m.label))],
           onChanged: (v) => setState(() => _method = v ?? PaymentMethod.cash),
         ),
         TextFormField(

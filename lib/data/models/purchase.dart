@@ -11,6 +11,7 @@ class Purchase implements Entity {
     this.invoiceNo = '',
     this.method = PaymentMethod.cash,
     this.description = '',
+    this.purchaserName = '',
     this.meta,
   });
 
@@ -22,30 +23,36 @@ class Purchase implements Entity {
   final String invoiceNo;
   final PaymentMethod method;
   final String description;
+
+  /// Who bought it. Cash purchases are settled against this purchaser's
+  /// advance and the cash they took from the counters.
+  final String purchaserName;
   @override
   final RecordMeta? meta;
 
   factory Purchase.fromMap(Map<String, Object?> m) => Purchase(
-        id: m['id'] as String,
-        date: m['date'] as String,
-        amount: asInt(m['amount']),
-        supplier: (m['supplier'] as String?) ?? '',
-        invoiceNo: (m['invoice_no'] as String?) ?? '',
-        method: PaymentMethod.parse(m['payment_method'] as String?),
-        description: (m['description'] as String?) ?? '',
-        meta: RecordMeta.fromMap(m),
-      );
+    id: m['id'] as String,
+    date: m['date'] as String,
+    amount: asInt(m['amount']),
+    supplier: (m['supplier'] as String?) ?? '',
+    invoiceNo: (m['invoice_no'] as String?) ?? '',
+    method: PaymentMethod.parse(m['payment_method'] as String?),
+    description: (m['description'] as String?) ?? '',
+    purchaserName: (m['purchaser_name'] as String?) ?? '',
+    meta: RecordMeta.fromMap(m),
+  );
 
   @override
   Map<String, Object?> toMap() => {
-        'id': id,
-        'date': date,
-        'amount': amount,
-        'supplier': supplier,
-        'invoice_no': invoiceNo,
-        'payment_method': method.name,
-        'description': description,
-      };
+    'id': id,
+    'date': date,
+    'amount': amount,
+    'supplier': supplier,
+    'invoice_no': invoiceNo,
+    'payment_method': method.name,
+    'description': description,
+    'purchaser_name': purchaserName,
+  };
 
   @override
   String describe() => 'Purchase $date ${Money.format(amount)} from "$supplier" via ${method.label}';

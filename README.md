@@ -24,6 +24,29 @@ check the daily cash flow of every counter and cashier.
 | Tiles | Sales, Purchase, Expense, Net Cash Flow, Cash to Purchaser, Cash Short/Excess |
 | Excel export (admin) | *More → Export to Excel* |
 
+### Counter Sale screen (v1.1)
+
+One screen per cashier per day: sales by payment method, **expenses** paid
+from the counter, and **cash given to the purchaser**, with a Counter Summary
+(sale − expenses − purchaser). Duty time is fixed at 7:00 AM – 8:00 PM and the
+opening cash is pre-filled with Rs 19,000 (`lib/core/shop_config.dart`).
+
+### Purchaser account (v1.1)
+
+Record the morning **Advance to Purchaser** (Add Entry). For each purchaser and day:
+
+```
+Balance = Advance + Cash taken from counters − Cash purchases
+```
+
+* Advance 2 lac, purchases 2.5 lac → the 50K taken from Counter 1 is recorded
+  on that counter's day and the account is settled.
+* Advance 2 lac, purchases 1.5 lac → **50K to return**, shown in green.
+* Spent more than given and not yet recorded from a counter → shown in red.
+
+The Excel export has **Purchaser Advances** and **Purchaser Account** sheets
+(live formulas, green/red balance).
+
 ### Cash checking (reconciliation)
 
 For every shift the app works out how much cash **should** be in the drawer:

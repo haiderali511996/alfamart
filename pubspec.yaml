@@ -2,7 +2,7 @@ name: alfamart_cashflow
 description: "Alfa Mart Cash Flow – offline-first accounts app for counters, cashiers, purchases and expenses."
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 
-version: 1.0.0+1
+version: 1.1.0+2
 
 environment:
   sdk: ^3.13.7

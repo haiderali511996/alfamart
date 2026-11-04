@@ -46,6 +46,16 @@ Future<void> shot(WidgetTester t, String name) async {
   await expectLater(find.byType(MaterialApp).first, matchesGoldenFile('screenshots/$name.png'));
 }
 
+/// Scrolls the page's list until [f] is built and on screen.
+Future<void> scrollTo(WidgetTester t, Finder f) async {
+  await t.scrollUntilVisible(
+    f,
+    250,
+    scrollable: find.descendant(of: find.byType(ListView).last, matching: find.byType(Scrollable)).first,
+  );
+  await t.pump();
+}
+
 Future<void> enter(WidgetTester t, String label, String text) async {
   await t.enterText(find.widgetWithText(TextFormField, label).first, text);
   await t.pump();
@@ -102,38 +112,58 @@ void main() {
     await t.tap(find.text('Dashboard'));
     await settle(t, 3);
 
-    // Shift sale.
+    // Counter sale with an expense and cash to purchaser on the same screen.
     await t.tap(find.text('Add Entry'));
     await settle(t, 3);
-    await t.tap(find.text('Shift Sale'));
+    await t.tap(find.text('Counter Sale'));
     await settle(t, 6);
+    expect(find.text('Duty time: 7:00 AM – 8:00 PM'), findsOneWidget);
+    expect(find.widgetWithText(TextFormField, '19000'), findsOneWidget); // opening cash prefilled
     await t.tap(find.text('Cashier').last);
     await settle(t, 2);
     await t.tap(find.text('Ali').last);
-    await settle(t, 2);
-    await enter(t, 'Opening cash in drawer (float)', '5000');
+    await settle(t, 3);
     await enter(t, 'Cash', '20000');
     await enter(t, 'POS Machine', '5000');
     await enter(t, 'Online Banking', '3000');
     await enter(t, 'JazzCash', '1000');
-    await enter(t, 'Cash counted at hand-over (optional)', '24500');
-    await settle(t, 2);
-    expect(find.text('Rs 29,000'), findsOneWidget); // live total
-    await shot(t, '04_shift_form');
-    await t.tap(find.text('Save'));
+    expect(find.text('Rs 29,000'), findsWidgets); // live total
+
+    await scrollTo(t, find.text('Add expense'));
+    await t.tap(find.text('Add expense'));
     await settle(t, 3);
-    // Counted 24,500 vs expected 25,000 → short warning dialog.
+    await enter(t, 'Amount', '500');
+    await enter(t, 'Details', 'Tea for staff');
+    await t.tap(find.widgetWithText(FilledButton, 'Add'));
+    await settle(t, 3);
+
+    await scrollTo(t, find.widgetWithText(TextButton, 'Add'));
+    await t.tap(find.widgetWithText(TextButton, 'Add').last);
+    await settle(t, 3);
+    await enter(t, 'Purchaser name', 'Kamran');
+    await enter(t, 'Amount given', '5000');
+    await t.tap(find.widgetWithText(FilledButton, 'Add'));
+    await settle(t, 3);
+
+    // Expected drawer: 19,000 + 20,000 − 500 − 5,000 = 33,500. Count 33,000 → short 500.
+    await scrollTo(t, find.text('Cash counted in drawer (optional)'));
+    await enter(t, 'Cash counted in drawer (optional)', '33000');
+    await settle(t, 2);
+    expect(find.text('Rs 33,500'), findsOneWidget);
+    await shot(t, '04_shift_form');
+    await t.tap(find.widgetWithText(FilledButton, 'Save'));
+    await settle(t, 3);
     expect(find.text('Cash is SHORT'), findsOneWidget);
     await t.tap(find.widgetWithText(FilledButton, 'Save').last);
     await settle(t, 8);
 
-    // Expense from Ali's drawer.
+    // Advance to the purchaser.
     await t.tap(find.text('Add Entry'));
     await settle(t, 3);
-    await t.tap(find.text('Expense').last);
+    await t.tap(find.text('Advance to Purchaser'));
     await settle(t, 6);
-    await enter(t, 'Amount', '500');
-    await enter(t, 'Details', 'Tea for staff');
+    expect(find.widgetWithText(TextFormField, 'Kamran'), findsOneWidget); // remembered name
+    await enter(t, 'Advance amount', '10000');
     await t.tap(find.text('Save'));
     await settle(t, 8);
 
@@ -143,14 +173,21 @@ void main() {
     await t.tap(find.text('Purchase').last);
     await settle(t, 4);
     await enter(t, 'Supplier / Vendor', 'Nestle');
-    await enter(t, 'Purchase amount', '10000');
+    await enter(t, 'Purchase amount', '12000');
     await t.tap(find.text('Save'));
     await settle(t, 8);
 
     expect(find.text('Rs 29,000'), findsWidgets); // sales tile
-    expect(find.text('Rs 10,000'), findsWidgets); // purchase tile
+    expect(find.text('Rs 12,000'), findsWidgets); // purchase tile
     expect(find.text('Rs 500'), findsWidgets); // expense tile
-    expect(find.text('Rs 18,500'), findsWidgets); // net
+    expect(find.text('Rs 16,500'), findsWidgets); // net
+    // Purchaser: advance 10,000 + 5,000 from Counter 1 − 12,000 bought = 3,000 to return.
+    await scrollTo(t, find.text('Purchaser Account'));
+    await settle(t, 2);
+    expect(find.text('To return Rs 3,000'), findsOneWidget);
+    expect(find.text('Taken from Counter 1: Rs 5,000'), findsOneWidget);
+    await shot(t, '08_purchaser');
+
     await shot(t, '03_dashboard');
 
     await t.tap(find.text('Records'));

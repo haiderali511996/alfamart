@@ -27,7 +27,6 @@ class _HandoverFormState extends State<HandoverForm> {
   final _amount = TextEditingController();
   final _purchaser = TextEditingController();
   final _purpose = TextEditingController();
-  final _purchaserFocus = FocusNode();
   Lookups? _lookups;
   List<String> _knownPurchasers = [];
   bool _saving = false;
@@ -54,13 +53,13 @@ class _HandoverFormState extends State<HandoverForm> {
   Future<void> _load() async {
     final s = context.read<AppServices>();
     final l = await Lookups.load(s, counterId: _counterId, cashierId: _cashierId);
-    final rows = await s.database.db.rawQuery(
-        'SELECT DISTINCT purchaser_name FROM cash_handovers WHERE is_deleted = 0 ORDER BY purchaser_name');
+    final names = await s.purchaserNames();
     if (!mounted) return;
     setState(() {
       _lookups = l;
       _counterId ??= l.counters.firstOrNull?.id;
-      _knownPurchasers = rows.map((r) => r['purchaser_name'] as String).toList();
+      _knownPurchasers = names;
+      if (widget.existing == null && names.length == 1) _purchaser.text = names.first;
     });
   }
 
@@ -100,48 +99,30 @@ class _HandoverFormState extends State<HandoverForm> {
           : () => deleteEntity(context, context.read<AppServices>().handovers, widget.existing!),
       children: [
         noCashiersHint(context, l),
-        Row(children: [
-          Expanded(flex: 3, child: DateField(value: _date, onChanged: (d) => setState(() => _date = d))),
-          const SizedBox(width: 12),
-          Expanded(flex: 2, child: TimeField(label: 'Time', value: _time, onChanged: (v) => setState(() => _time = v))),
-        ]),
+        Row(
+          children: [
+            Expanded(
+              flex: 3,
+              child: DateField(value: _date, onChanged: (d) => setState(() => _date = d)),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              flex: 2,
+              child: TimeField(label: 'Time', value: _time, onChanged: (v) => setState(() => _time = v)),
+            ),
+          ],
+        ),
         counterDropdown(l, _counterId, (v) => setState(() => _counterId = v)),
         cashierDropdown(l, _counterId, _cashierId, (v) => setState(() => _cashierId = v)),
-        RawAutocomplete<String>(
-          textEditingController: _purchaser,
-          focusNode: _purchaserFocus,
-          optionsViewBuilder: (context, onSelected, options) => Align(
-            alignment: Alignment.topLeft,
-            child: Material(
-              elevation: 4,
-              borderRadius: BorderRadius.circular(12),
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxHeight: 220, maxWidth: 360),
-                child: ListView(
-                  padding: EdgeInsets.zero,
-                  shrinkWrap: true,
-                  children: [for (final o in options) ListTile(title: Text(o), onTap: () => onSelected(o))],
-                ),
-              ),
-            ),
-          ),
-          optionsBuilder: (v) => _knownPurchasers
-              .where((p) => p.toLowerCase().contains(v.text.toLowerCase()) && p.toLowerCase() != v.text.toLowerCase()),
-          fieldViewBuilder: (context, controller, focus, onSubmit) {
-            return TextFormField(
-              controller: controller,
-              focusNode: focus,
-              decoration: const InputDecoration(labelText: 'Purchaser name', prefixIcon: Icon(Icons.badge)),
-              validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
-            );
-          },
-        ),
+        PurchaserNameField(controller: _purchaser, names: _knownPurchasers),
         AmountField(controller: _amount, label: 'Amount taken', icon: Icons.payments, required: true, allowZero: false),
         TextFormField(
           controller: _purpose,
           maxLines: 3,
           decoration: const InputDecoration(
-              labelText: 'Purpose / details (what will be bought)', prefixIcon: Icon(Icons.notes)),
+            labelText: 'Purpose / details (what will be bought)',
+            prefixIcon: Icon(Icons.notes),
+          ),
         ),
       ],
     );
