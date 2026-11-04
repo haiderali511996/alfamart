@@ -34,20 +34,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return Scaffold(
       appBar: AppBar(
         toolbarHeight: 64,
-        title: Row(children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: Image.asset('assets/images/app_icon.png', width: 38, height: 38),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('Alfa Mart', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
-              Text('${user.fullName} · ${user.role.label}',
-                  style: const TextStyle(fontSize: 12, color: Colors.white70)),
-            ]),
-          ),
-        ]),
+        title: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.asset('assets/images/app_icon.png', width: 38, height: 38),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Alfa Mart', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
+                  Text(
+                    '${user.fullName} · ${user.role.label}',
+                    style: const TextStyle(fontSize: 12, color: Colors.white70),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
       body: Reloader<(ReportData, List<Counter>)>(
         reloadKey: (_range, _counterId),
@@ -76,6 +83,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 const SizedBox(height: 16),
                 _trend(r),
                 const SizedBox(height: 16),
+                if (r.purchaserDays.isNotEmpty) ...[_purchaser(r), const SizedBox(height: 16)],
                 for (final c in r.byCounter.values) ...[_counterCard(r, c), const SizedBox(height: 16)],
                 if (r.expensesByCategory.isNotEmpty) _categories(r),
               ],
@@ -87,22 +95,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _counterChips(List<Counter> counters) => SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(children: [
-          for (final c in [null, ...counters])
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: FilterChip(
-                label: Text(c?.name ?? 'All Counters'),
-                selected: _counterId == c?.id,
-                showCheckmark: false,
-                selectedColor: AppColors.navy,
-                labelStyle: TextStyle(color: _counterId == c?.id ? Colors.white : AppColors.navy),
-                onSelected: (_) => setState(() => _counterId = c?.id),
-              ),
+    scrollDirection: Axis.horizontal,
+    child: Row(
+      children: [
+        for (final c in [null, ...counters])
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: FilterChip(
+              label: Text(c?.name ?? 'All Counters'),
+              selected: _counterId == c?.id,
+              showCheckmark: false,
+              selectedColor: AppColors.navy,
+              labelStyle: TextStyle(color: _counterId == c?.id ? Colors.white : AppColors.navy),
+              onSelected: (_) => setState(() => _counterId = c?.id),
             ),
-        ]),
-      );
+          ),
+      ],
+    ),
+  );
 
   Widget _tiles(ReportData r) {
     final se = r.shortExcess;
@@ -150,53 +160,63 @@ class _DashboardScreenState extends State<DashboardScreen> {
         subtitle: r.uncountedShifts > 0 ? '${r.uncountedShifts} shift(s) not counted' : 'All drawers counted',
       ),
     ];
-    return LayoutBuilder(builder: (context, c) {
-      final cols = c.maxWidth > 700 ? 3 : 2;
-      final w = (c.maxWidth - (cols - 1) * 12) / cols;
-      return Wrap(
-        spacing: 12,
-        runSpacing: 12,
-        children: [for (final t in tiles) SizedBox(width: w, height: 118, child: t)],
-      );
-    });
+    return LayoutBuilder(
+      builder: (context, c) {
+        final cols = c.maxWidth > 700 ? 3 : 2;
+        final w = (c.maxWidth - (cols - 1) * 12) / cols;
+        return Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: [for (final t in tiles) SizedBox(width: w, height: 118, child: t)],
+        );
+      },
+    );
   }
 
   Widget _methods(ReportData r) {
     final total = r.totalSales;
     return SectionCard(
       title: 'Sales by Payment Method',
-      child: Column(children: [
-        for (final m in PaymentMethod.salesMethods)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 6),
-            child: Column(children: [
-              Row(children: [
-                Icon(m.icon, size: 18, color: AppColors.navy),
-                const SizedBox(width: 8),
-                Expanded(child: Text(m.label, style: const TextStyle(fontWeight: FontWeight.w600))),
-                Text(Money.format(r.salesByMethod[m]!), style: const TextStyle(fontWeight: FontWeight.w700)),
-                SizedBox(
-                  width: 48,
-                  child: Text(
-                    total == 0 ? '0%' : '${(r.salesByMethod[m]! * 100 / total).toStringAsFixed(0)}%',
-                    textAlign: TextAlign.right,
-                    style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+      child: Column(
+        children: [
+          for (final m in PaymentMethod.salesMethods)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      Icon(m.icon, size: 18, color: AppColors.navy),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(m.label, style: const TextStyle(fontWeight: FontWeight.w600)),
+                      ),
+                      Text(Money.format(r.salesByMethod[m]!), style: const TextStyle(fontWeight: FontWeight.w700)),
+                      SizedBox(
+                        width: 48,
+                        child: Text(
+                          total == 0 ? '0%' : '${(r.salesByMethod[m]! * 100 / total).toStringAsFixed(0)}%',
+                          textAlign: TextAlign.right,
+                          style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                        ),
+                      ),
+                    ],
                   ),
-                ),
-              ]),
-              const SizedBox(height: 4),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(4),
-                child: LinearProgressIndicator(
-                  value: total == 0 ? 0 : r.salesByMethod[m]! / total,
-                  minHeight: 6,
-                  backgroundColor: Colors.grey.shade200,
-                  color: AppColors.orange,
-                ),
+                  const SizedBox(height: 4),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: total == 0 ? 0 : r.salesByMethod[m]! / total,
+                      minHeight: 6,
+                      backgroundColor: Colors.grey.shade200,
+                      color: AppColors.orange,
+                    ),
+                  ),
+                ],
               ),
-            ]),
-          ),
-      ]),
+            ),
+        ],
+      ),
     );
   }
 
@@ -206,15 +226,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final step = math.max(1, (points.length / 8).ceil());
     return SectionCard(
       title: 'Trend',
-      trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-        _legend('Sales', AppColors.sales),
-        _legend('Purchase', AppColors.purchase),
-        _legend('Expense', AppColors.expense),
-      ]),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _legend('Sales', AppColors.sales),
+          _legend('Purchase', AppColors.purchase),
+          _legend('Expense', AppColors.expense),
+        ],
+      ),
       child: SizedBox(
         height: 200,
         child: maxY == 0
-            ? Center(child: Text('No data in this period', style: TextStyle(color: Colors.grey.shade600)))
+            ? Center(
+                child: Text('No data in this period', style: TextStyle(color: Colors.grey.shade600)),
+              )
             : BarChart(
                 BarChartData(
                   maxY: maxY * 1.15 / 100,
@@ -239,8 +264,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       sideTitles: SideTitles(
                         showTitles: true,
                         reservedSize: 44,
-                        getTitlesWidget: (v, meta) => Text(Money.compact((v * 100).round()).replaceFirst('Rs ', ''),
-                            style: const TextStyle(fontSize: 10)),
+                        getTitlesWidget: (v, meta) => Text(
+                          Money.compact((v * 100).round()).replaceFirst('Rs ', ''),
+                          style: const TextStyle(fontSize: 10),
+                        ),
                       ),
                     ),
                     bottomTitles: AxisTitles(
@@ -277,67 +304,154 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   BarChartRodData _rod(int paisa, Color c, int n) => BarChartRodData(
-        toY: paisa / 100,
-        color: c,
-        width: n > 20 ? 2 : (n > 8 ? 4 : 8),
-        borderRadius: BorderRadius.circular(2),
-      );
+    toY: paisa / 100,
+    color: c,
+    width: n > 20 ? 2 : (n > 8 ? 4 : 8),
+    borderRadius: BorderRadius.circular(2),
+  );
 
   Widget _legend(String l, Color c) => Padding(
-        padding: const EdgeInsets.only(left: 8),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Container(width: 10, height: 10, decoration: BoxDecoration(color: c, borderRadius: BorderRadius.circular(2))),
-          const SizedBox(width: 4),
-          Text(l, style: const TextStyle(fontSize: 11)),
-        ]),
-      );
+    padding: const EdgeInsets.only(left: 8),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(color: c, borderRadius: BorderRadius.circular(2)),
+        ),
+        const SizedBox(width: 4),
+        Text(l, style: const TextStyle(fontSize: 11)),
+      ],
+    ),
+  );
 
   Widget _counterCard(ReportData r, CounterSummary c) {
     final cashiers = c.cashiers.values.where((x) => x.shifts > 0 || x.handovers > 0 || x.cashExpenses > 0).toList()
       ..sort((a, b) => b.sales.compareTo(a.sales));
     return SectionCard(
       title: c.counter.name,
-      trailing: Text(Money.format(c.sales),
-          style: const TextStyle(fontWeight: FontWeight.w800, color: AppColors.orange, fontSize: 16)),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Wrap(spacing: 8, runSpacing: 8, children: [
-          for (final m in PaymentMethod.salesMethods) _chip(m.label, c.byMethod[m]!),
-        ]),
-        const Divider(height: 24),
-        MoneyRow('Cash given to purchaser', c.handovers, color: AppColors.handover),
-        MoneyRow('Counter expenses', c.expenses, color: AppColors.expense),
-        MoneyRow(c.shortExcess < 0 ? 'Cash short' : 'Cash excess', c.shortExcess.abs(),
-            bold: true,
-            color: c.shortExcess == 0 ? AppColors.success : (c.shortExcess < 0 ? AppColors.danger : AppColors.warning)),
-        if (cashiers.isNotEmpty) ...[
+      trailing: Text(
+        Money.format(c.sales),
+        style: const TextStyle(fontWeight: FontWeight.w800, color: AppColors.orange, fontSize: 16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [for (final m in PaymentMethod.salesMethods) _chip(m.label, c.byMethod[m]!)],
+          ),
           const Divider(height: 24),
-          const Text('Cashiers', style: TextStyle(fontWeight: FontWeight.w700)),
-          const SizedBox(height: 4),
-          for (final cs in cashiers)
-            ListTile(
-              dense: true,
-              contentPadding: EdgeInsets.zero,
-              leading: CircleAvatar(
-                radius: 16,
-                backgroundColor: AppColors.navy.withValues(alpha: 0.1),
-                child: Text(cs.name.isEmpty ? '?' : cs.name[0].toUpperCase(),
-                    style: const TextStyle(color: AppColors.navy, fontWeight: FontWeight.w700)),
+          MoneyRow('Cash given to purchaser', c.handovers, color: AppColors.handover),
+          MoneyRow('Counter expenses', c.expenses, color: AppColors.expense),
+          MoneyRow(
+            c.shortExcess < 0 ? 'Cash short' : 'Cash excess',
+            c.shortExcess.abs(),
+            bold: true,
+            color: c.shortExcess == 0 ? AppColors.success : (c.shortExcess < 0 ? AppColors.danger : AppColors.warning),
+          ),
+          if (cashiers.isNotEmpty) ...[
+            const Divider(height: 24),
+            const Text('Cashiers', style: TextStyle(fontWeight: FontWeight.w700)),
+            const SizedBox(height: 4),
+            for (final cs in cashiers)
+              ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                leading: CircleAvatar(
+                  radius: 16,
+                  backgroundColor: AppColors.navy.withValues(alpha: 0.1),
+                  child: Text(
+                    cs.name.isEmpty ? '?' : cs.name[0].toUpperCase(),
+                    style: const TextStyle(color: AppColors.navy, fontWeight: FontWeight.w700),
+                  ),
+                ),
+                title: Text(cs.name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                subtitle: Text(
+                  '${cs.shifts} shift(s) · to purchaser ${Money.format(cs.handovers)}'
+                  '${cs.shortExcess != 0 ? ' · ${cs.shortExcess < 0 ? 'short' : 'excess'} ${Money.format(cs.shortExcess.abs())}' : ''}',
+                ),
+                trailing: Text(Money.format(cs.sales), style: const TextStyle(fontWeight: FontWeight.w700)),
               ),
-              title: Text(cs.name, style: const TextStyle(fontWeight: FontWeight.w600)),
-              subtitle: Text('${cs.shifts} shift(s) · to purchaser ${Money.format(cs.handovers)}'
-                  '${cs.shortExcess != 0 ? ' · ${cs.shortExcess < 0 ? 'short' : 'excess'} ${Money.format(cs.shortExcess.abs())}' : ''}'),
-              trailing: Text(Money.format(cs.sales), style: const TextStyle(fontWeight: FontWeight.w700)),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// Advance + cash from counters − cash purchases, per purchaser per day.
+  Widget _purchaser(ReportData r) {
+    Color colorOf(int b) => b > 0 ? AppColors.success : (b < 0 ? AppColors.danger : AppColors.navy);
+    String labelOf(int b) => b > 0 ? 'To return' : (b < 0 ? 'Not covered' : 'Settled');
+    final days = r.purchaserDays.take(10).toList();
+    return SectionCard(
+      title: 'Purchaser Account',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          MoneyRow('Advance given', r.totalAdvances),
+          MoneyRow('+ Taken from counters', r.totalHandovers, color: AppColors.handover),
+          MoneyRow('− Cash purchases', r.totalCashPurchases, color: AppColors.purchase),
+          const Divider(),
+          MoneyRow(
+            labelOf(r.purchaserBalance),
+            r.purchaserBalance.abs(),
+            bold: true,
+            color: colorOf(r.purchaserBalance),
+          ),
+          const SizedBox(height: 8),
+          for (final d in days)
+            Container(
+              margin: const EdgeInsets.only(top: 8),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: colorOf(d.balance).withValues(alpha: 0.07),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: colorOf(d.balance).withValues(alpha: 0.3)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '${d.name} · ${displayDate(d.date)}',
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                      Text(
+                        '${labelOf(d.balance)} ${Money.format(d.balance.abs())}',
+                        style: TextStyle(fontWeight: FontWeight.w800, color: colorOf(d.balance)),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Advance ${Money.format(d.advance)} · purchases ${Money.format(d.cashPurchases)}'
+                    '${d.otherPurchases > 0 ? ' (+${Money.format(d.otherPurchases)} not cash)' : ''}',
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                  ),
+                  for (final e in d.byCounter.entries)
+                    Text(
+                      'Taken from ${r.counterName(e.key)}: ${Money.format(e.value)}',
+                      style: const TextStyle(fontSize: 12, color: AppColors.handover, fontWeight: FontWeight.w600),
+                    ),
+                ],
+              ),
             ),
         ],
-      ]),
+      ),
     );
   }
 
   Widget _chip(String label, int v) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(8)),
-        child: Text('$label: ${Money.format(v)}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-      );
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+    decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(8)),
+    child: Text('$label: ${Money.format(v)}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+  );
 
   Widget _categories(ReportData r) {
     final entries = r.expensesByCategory.entries.toList()..sort((a, b) => b.value.compareTo(a.value));

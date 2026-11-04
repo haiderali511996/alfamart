@@ -9,6 +9,7 @@ import '../../data/repositories/repository.dart';
 import '../../services/app_services.dart';
 import '../../services/auth_service.dart';
 import '../widgets/common.dart';
+import 'advance_form.dart';
 import 'expense_form.dart';
 import 'handover_form.dart';
 import 'purchase_form.dart';
@@ -33,8 +34,16 @@ Future<void> showAddEntrySheet(BuildContext context) async {
               0,
               Icons.point_of_sale,
               AppColors.sales,
-              'Shift Sale',
-              'Cashier sales on a counter (Cash, POS, Online, JazzCash)',
+              'Counter Sale',
+              'Sales, expenses and cash to purchaser – all on one screen',
+            ),
+            _option(
+              ctx,
+              4,
+              Icons.account_balance_wallet,
+              AppColors.handover,
+              'Advance to Purchaser',
+              'Cash given to the purchaser before buying',
             ),
             _option(ctx, 1, Icons.shopping_cart, AppColors.purchase, 'Purchase', 'Stock purchased today'),
             _option(
@@ -57,6 +66,7 @@ Future<void> showAddEntrySheet(BuildContext context) async {
     0 => const ShiftSaleForm(),
     1 => const PurchaseForm(),
     2 => const HandoverForm(),
+    4 => const AdvanceForm(),
     _ => const ExpenseForm(),
   };
   await Navigator.push(context, MaterialPageRoute(builder: (_) => page));
@@ -243,5 +253,63 @@ Future<void> deleteEntity<T extends Entity>(BuildContext context, Repository<T> 
   if (context.mounted) {
     showSnack(context, 'Deleted');
     Navigator.pop(context, true);
+  }
+}
+
+/// Purchaser name with suggestions from names used before, so the same
+/// person is always spelled the same way (their account is matched by name).
+class PurchaserNameField extends StatefulWidget {
+  const PurchaserNameField({super.key, required this.controller, required this.names, this.required = true});
+  final TextEditingController controller;
+  final List<String> names;
+  final bool required;
+
+  @override
+  State<PurchaserNameField> createState() => _PurchaserNameFieldState();
+}
+
+class _PurchaserNameFieldState extends State<PurchaserNameField> {
+  final _focus = FocusNode();
+
+  @override
+  void dispose() {
+    _focus.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return RawAutocomplete<String>(
+      textEditingController: widget.controller,
+      focusNode: _focus,
+      optionsBuilder: (v) => widget.names.where(
+        (p) => p.toLowerCase().contains(v.text.toLowerCase()) && p.toLowerCase() != v.text.toLowerCase(),
+      ),
+      optionsViewBuilder: (context, onSelected, options) => Align(
+        alignment: Alignment.topLeft,
+        child: Material(
+          elevation: 4,
+          borderRadius: BorderRadius.circular(12),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 220, maxWidth: 320),
+            child: ListView(
+              padding: EdgeInsets.zero,
+              shrinkWrap: true,
+              children: [for (final o in options) ListTile(title: Text(o), onTap: () => onSelected(o))],
+            ),
+          ),
+        ),
+      ),
+      fieldViewBuilder: (context, controller, focus, onSubmit) => TextFormField(
+        controller: controller,
+        focusNode: focus,
+        textCapitalization: TextCapitalization.words,
+        decoration: InputDecoration(
+          labelText: widget.required ? 'Purchaser name' : 'Purchaser (who bought it)',
+          prefixIcon: const Icon(Icons.badge),
+        ),
+        validator: (v) => (widget.required && (v == null || v.trim().isEmpty)) ? 'Required' : null,
+      ),
+    );
   }
 }

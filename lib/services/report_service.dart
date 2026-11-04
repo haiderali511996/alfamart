@@ -7,6 +7,7 @@ import '../data/models/cashier.dart';
 import '../data/models/counter.dart';
 import '../data/models/expense.dart';
 import '../data/models/purchase.dart';
+import '../data/models/purchaser_advance.dart';
 import '../data/models/shift_sale.dart';
 import 'app_services.dart';
 
@@ -35,6 +36,35 @@ class CounterSummary {
   int get sales => byMethod.values.fold(0, (a, b) => a + b);
 }
 
+/// One purchaser's cash on one day.
+///
+/// Advance + cash taken from counters − cash purchases = balance.
+/// Positive: the purchaser holds that much and must return it (green).
+/// Negative: more was spent than the purchaser was given (red) – the gap
+/// still has to be recorded as cash taken from a counter.
+class PurchaserDay {
+  PurchaserDay(this.date, this.name);
+  final String date;
+  final String name;
+  int advance = 0;
+  int fromCounters = 0;
+  int cashPurchases = 0;
+  int otherPurchases = 0;
+
+  /// Cash taken from each counter (counter id → amount).
+  final Map<String, int> byCounter = {};
+
+  int get balance => advance + fromCounters - cashPurchases;
+}
+
+/// Name used when a purchase has no purchaser.
+const unnamedPurchaser = '(not named)';
+
+String purchaserKey(String name) {
+  final n = name.trim();
+  return n.isEmpty ? unnamedPurchaser.toLowerCase() : n.toLowerCase();
+}
+
 class TrendPoint {
   TrendPoint(this.key, this.label);
   final String key;
@@ -57,6 +87,7 @@ class ReportData {
     required this.purchases,
     required this.handovers,
     required this.expenses,
+    this.advances = const [],
   }) {
     _compute();
   }
@@ -69,6 +100,7 @@ class ReportData {
   final List<Purchase> purchases;
   final List<CashHandover> handovers;
   final List<Expense> expenses;
+  final List<PurchaserAdvance> advances;
 
   final Map<PaymentMethod, int> salesByMethod = {for (final m in PaymentMethod.salesMethods) m: 0};
   final Map<PaymentMethod, int> purchasesByMethod = {};
@@ -76,6 +108,9 @@ class ReportData {
   final Map<String, CounterSummary> byCounter = {};
   final Map<String, int> _handoverKey = {};
   final Map<String, int> _cashExpenseKey = {};
+
+  /// Purchaser settlements, newest day first.
+  List<PurchaserDay> purchaserDays = [];
   int generalExpenses = 0;
   int shortExcess = 0;
   int uncountedShifts = 0;
@@ -85,8 +120,13 @@ class ReportData {
   int get totalPurchases => purchases.fold(0, (a, b) => a + b.amount);
   int get totalExpenses => expenses.fold(0, (a, b) => a + b.amount);
   int get totalHandovers => handovers.fold(0, (a, b) => a + b.amount);
+  int get totalAdvances => advances.fold(0, (a, b) => a + b.amount);
+  int get totalCashPurchases => purchases.where((p) => p.method == PaymentMethod.cash).fold(0, (a, b) => a + b.amount);
+
+  /// Advances + cash from counters − cash purchases, for the whole period.
+  int get purchaserBalance => totalAdvances + totalHandovers - totalCashPurchases;
   int get netCashFlow => totalSales - totalPurchases - totalExpenses;
-  bool get isEmpty => shifts.isEmpty && purchases.isEmpty && handovers.isEmpty && expenses.isEmpty;
+  bool get isEmpty => shifts.isEmpty && purchases.isEmpty && handovers.isEmpty && expenses.isEmpty && advances.isEmpty;
 
   String cashierName(String? id) => id == null ? '' : (cashierById[id]?.name ?? 'Unknown');
   String counterName(String? id) => id == null ? 'General' : (counterById[id]?.name ?? 'Unknown');
@@ -106,7 +146,9 @@ class ReportData {
   int? difference(ShiftSale s) => s.closingCash == null ? null : s.closingCash! - expectedCash(s);
 
   CounterSummary _counter(String id) => byCounter.putIfAbsent(
-      id, () => CounterSummary(counterById[id] ?? Counter(id: id, name: 'Unknown', isActive: false)));
+    id,
+    () => CounterSummary(counterById[id] ?? Counter(id: id, name: 'Unknown', isActive: false)),
+  );
 
   CashierSummary _cashier(CounterSummary c, String id) =>
       c.cashiers.putIfAbsent(id, () => CashierSummary(id, cashierName(id)));
@@ -163,7 +205,38 @@ class ReportData {
         cs.shortExcess += diff;
       }
     }
+    _buildPurchaserDays();
     _buildTrend();
+  }
+
+  void _buildPurchaserDays() {
+    final days = <String, PurchaserDay>{};
+    PurchaserDay day(String date, String name) {
+      final display = name.trim().isEmpty ? unnamedPurchaser : name.trim();
+      return days.putIfAbsent('$date|${purchaserKey(name)}', () => PurchaserDay(date, display));
+    }
+
+    for (final a in advances) {
+      day(a.date, a.purchaserName).advance += a.amount;
+    }
+    for (final h in handovers) {
+      final d = day(h.date, h.purchaserName)..fromCounters += h.amount;
+      d.byCounter[h.counterId] = (d.byCounter[h.counterId] ?? 0) + h.amount;
+    }
+    for (final p in purchases) {
+      final d = day(p.date, p.purchaserName);
+      if (p.method == PaymentMethod.cash) {
+        d.cashPurchases += p.amount;
+      } else {
+        d.otherPurchases += p.amount;
+      }
+    }
+    // A day with only non-cash purchases doesn't touch the purchaser's cash.
+    purchaserDays = days.values.where((d) => d.advance != 0 || d.fromCounters != 0 || d.cashPurchases != 0).toList()
+      ..sort((a, b) {
+        final c = b.date.compareTo(a.date);
+        return c != 0 ? c : a.name.compareTo(b.name);
+      });
   }
 
   void _buildTrend() {
@@ -212,10 +285,9 @@ class ReportService {
       counterId == null ? services.purchases.inRange(s, e) : Future.value(<Purchase>[]),
       services.handovers.inRange(s, e, extraWhere: counterFilter, extraArgs: counterArgs),
       services.expenses.inRange(s, e, extraWhere: counterFilter, extraArgs: counterArgs),
+      counterId == null ? services.advances.inRange(s, e) : Future.value(<PurchaserAdvance>[]),
     ]);
-    final shownCounters = allCounters
-        .where((c) => counterId == null ? c.isActive : c.id == counterId)
-        .toList();
+    final shownCounters = allCounters.where((c) => counterId == null ? c.isActive : c.id == counterId).toList();
     return ReportData(
       range: range,
       counters: shownCounters,
@@ -225,6 +297,7 @@ class ReportService {
       purchases: (results[1] as List<Purchase>)..sort((a, b) => a.date.compareTo(b.date)),
       handovers: (results[2] as List<CashHandover>)..sort((a, b) => a.date.compareTo(b.date)),
       expenses: (results[3] as List<Expense>)..sort((a, b) => a.date.compareTo(b.date)),
+      advances: (results[4] as List<PurchaserAdvance>)..sort((a, b) => a.date.compareTo(b.date)),
     );
   }
 

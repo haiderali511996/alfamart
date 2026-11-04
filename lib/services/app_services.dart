@@ -7,6 +7,7 @@ import '../data/models/cashier.dart';
 import '../data/models/counter.dart';
 import '../data/models/expense.dart';
 import '../data/models/purchase.dart';
+import '../data/models/purchaser_advance.dart';
 import '../data/models/shift_sale.dart';
 import '../data/repositories/repository.dart';
 
@@ -14,14 +15,26 @@ import '../data/repositories/repository.dart';
 /// the widget tree.
 class AppServices {
   AppServices(this.database, this.notifier)
-      : users = Repository(database, 'users', AppUser.fromMap, notifier, entityName: 'User'),
-        counters = Repository(database, 'counters', Counter.fromMap, notifier, entityName: 'Counter'),
-        cashiers = Repository(database, 'cashiers', Cashier.fromMap, notifier, entityName: 'Cashier'),
-        shifts = Repository(database, 'shift_sales', ShiftSale.fromMap, notifier, entityName: 'Shift sale'),
-        purchases = Repository(database, 'purchases', Purchase.fromMap, notifier, entityName: 'Purchase'),
-        handovers =
-            Repository(database, 'cash_handovers', CashHandover.fromMap, notifier, entityName: 'Cash to purchaser'),
-        expenses = Repository(database, 'expenses', Expense.fromMap, notifier, entityName: 'Expense');
+    : users = Repository(database, 'users', AppUser.fromMap, notifier, entityName: 'User'),
+      counters = Repository(database, 'counters', Counter.fromMap, notifier, entityName: 'Counter'),
+      cashiers = Repository(database, 'cashiers', Cashier.fromMap, notifier, entityName: 'Cashier'),
+      shifts = Repository(database, 'shift_sales', ShiftSale.fromMap, notifier, entityName: 'Shift sale'),
+      purchases = Repository(database, 'purchases', Purchase.fromMap, notifier, entityName: 'Purchase'),
+      handovers = Repository(
+        database,
+        'cash_handovers',
+        CashHandover.fromMap,
+        notifier,
+        entityName: 'Cash to purchaser',
+      ),
+      expenses = Repository(database, 'expenses', Expense.fromMap, notifier, entityName: 'Expense'),
+      advances = Repository(
+        database,
+        'purchaser_advances',
+        PurchaserAdvance.fromMap,
+        notifier,
+        entityName: 'Purchaser advance',
+      );
 
   final AppDatabase database;
   final DataChangeNotifier notifier;
@@ -32,9 +45,19 @@ class AppServices {
   final Repository<Purchase> purchases;
   final Repository<CashHandover> handovers;
   final Repository<Expense> expenses;
+  final Repository<PurchaserAdvance> advances;
 
-  Future<List<Counter>> activeCounters() =>
-      counters.query(where: 'is_active = 1', orderBy: 'sort_order, name');
+  /// Purchaser names used before, for autocomplete.
+  Future<List<String>> purchaserNames() async {
+    final rows = await database.db.rawQuery('''
+      SELECT purchaser_name AS n FROM cash_handovers WHERE is_deleted = 0
+      UNION SELECT purchaser_name FROM purchaser_advances WHERE is_deleted = 0
+      UNION SELECT purchaser_name FROM purchases WHERE is_deleted = 0
+      ORDER BY 1''');
+    return rows.map((r) => (r['n'] as String?)?.trim() ?? '').where((n) => n.isNotEmpty).toSet().toList();
+  }
+
+  Future<List<Counter>> activeCounters() => counters.query(where: 'is_active = 1', orderBy: 'sort_order, name');
 
   Future<List<Cashier>> activeCashiers() => cashiers.query(where: 'is_active = 1', orderBy: 'name');
 
@@ -44,7 +67,6 @@ class AppServices {
   }
 
   Future<void> setSetting(String key, String? value) async {
-    await database.db.insert('settings', {'key': key, 'value': value},
-        conflictAlgorithm: ConflictAlgorithm.replace);
+    await database.db.insert('settings', {'key': key, 'value': value}, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 }
